@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  
+  ray-de-head:
+    image: "ray-de:latest"
+    tty: true
+  
+  ray-de-worker-1:
+    image: "ray-de:latest"
+    tty: true
+  
+  ray-de-worker-2:
+    image: "ray-de:latest"
+    tty: true
