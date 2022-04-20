@@ -3,4 +3,4 @@ docker run -it \
 	--rm \
 	--shm-size 5gb \
 	--name $container_name \
-	ray-de
+	ray-de:latest
