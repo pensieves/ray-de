@@ -1,3 +1,5 @@
+gym~=0.22.0
+panda-gym~=2.0.1
 ray[rllib]~=1.12.0
 torch~=1.11.0
 torchvision~=0.12.0
