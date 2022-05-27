@@ -6,7 +6,7 @@ This is an integration example of a ns3-gym environment so that it can be used w
 2. mygym.cc
 3. sim.cc
 
-are copied "as is" from the [interference-pattern](https://github.com/tkn-tub/ns3-gym/tree/master/scratch/interference-pattern) example provided in the [ns3-gym github repo](https://github.com/tkn-tub/ns3-gym). *For a different custom environment, we will be required to write at least these files with our custom logic.*
+are copied "as is" from the [interference-pattern](https://github.com/tkn-tub/ns3-gym/tree/master/scratch/interference-pattern) example provided in the [ns3-gym github repo](https://github.com/tkn-tub/ns3-gym). *For a different custom environment, we will be required to write at least these files with our custom logic, while the ray\[rllib\] wrapper and helper files should be copied and used as it is.*
 
 The required ray\[rllib\] wrapper and helper files provided here are:
 
