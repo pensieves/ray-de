@@ -1,7 +1,7 @@
-Waf: Entering directory `/home/harold/Documents/installs/ns-3.35-orig/ns3-gym/build'
-Waf: Leaving directory `/home/harold/Documents/installs/ns-3.35-orig/ns3-gym/build'
+Waf: Entering directory `/media/t2r/HDD/riz/ns-allinone-3.35/ns-3.35/build'
+Waf: Leaving directory `/media/t2r/HDD/riz/ns-allinone-3.35/ns-3.35/build'
 Build commands will be stored in build/compile_commands.json
-'build' finished successfully (0.433s)
+'build' finished successfully (0.535s)
 /NodeList/5/DeviceList/0/LteUeRrc/ConnectionEstablished at 0.0202143 (sec) UE IMSI 1: connected to CellId 1 with RNTI 1
 /NodeList/6/DeviceList/0/LteUeRrc/ConnectionEstablished at 0.0202143 (sec) UE IMSI 2: connected to CellId 2 with RNTI 1
 /NodeList/3/DeviceList/0/LteEnbRrc/ConnectionEstablished at 0.0202143 (sec) eNB CellId 1: successful connection of UE with IMSI 1 RNTI 1

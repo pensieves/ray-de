@@ -19,6 +19,8 @@
  */
 
 #include <vector>
+#include <algorithm>
+#include "ns3/opengym-module.h"
 
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
@@ -31,7 +33,7 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE ("LenaX2HandoverMeasures");
+NS_LOG_COMPONENT_DEFINE ("OpenGymHandoverOptimization");
 
 void
 NotifyConnectionEstablishedUe (std::string context,
@@ -125,21 +127,39 @@ NotifyHandoverEndOkEnb (std::string context,
 uint32_t numberOfUes = 2; // can be changed in main()
 uint32_t numberOfEnbs = 2; // can be changed in main()
 // uint16_t numBearersPerUe = 0;
+
+NodeContainer ueNodes;
+NodeContainer enbNodes;
+
+Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
+NetDeviceContainer ueLteDevs;
+NetDeviceContainer enbLteDevs;
+
 std::vector<double> measTime; // for each UE - simulation time at which measurement was collected
-std::vector<std::vector<uint32_t>> measAsState; // for each UE - first RSRP of all Enbs, then RSRQ of all Enbs and then current/serving cell ID
+// for each UE - first RSRP of all Enbs, then RSRQ of all Enbs and then one-hot encoding of current/serving cell ID
+std::vector<uint32_t> measAsState;
+// current RNTI of each UE
+std::vector<uint16_t> measRnti;
 
 void
-printCurrentStateAndTime(){
+printCurrentStateRntiAndTime(){
   std::cout << "Time:" << std::endl;
   for (double t: measTime){
     std::cout << t << " ";
   }
   std::cout << std::endl;
 
+  std::cout << "RNTI:" << std::endl;
+  for (uint16_t r: measRnti){
+    std::cout << r << " ";
+  }
+  std::cout << std::endl;
+
   std::cout << "RSRP-RSRQ-ServingCellId State:" << std::endl;
-  for (std::vector<uint32_t> s: measAsState){
-    for (uint32_t e: s){
-      std::cout << e << " ";
+  uint32_t state_dim = 3*enbNodes.GetN ();
+  for (uint32_t i = 0; i < ueNodes.GetN (); ++i){
+    for (uint32_t j = 0; j < state_dim; ++j){
+      std::cout << measAsState[i*state_dim+j] << " ";
     }
     std::cout << std::endl;
   }
@@ -156,6 +176,7 @@ ReceiveMeasurementReport (std::string context,
     uint32_t curCellRSRP = (uint32_t) measReport.measResults.rsrpResult;
     uint32_t curCellRSRQ = (uint32_t) measReport.measResults.rsrqResult;
     double curSimTime = Simulator::Now ().GetSeconds ();
+    int32_t state_dim = 3*enbNodes.GetN ();
 
     std::cout << context
               << " at time " << curSimTime << " (sec)"
@@ -168,20 +189,169 @@ ReceiveMeasurementReport (std::string context,
               << std::endl;
 
     measTime[imsi-1] = curSimTime;
-    measAsState[imsi-1][cellid-1] = curCellRSRP; // first RSRPs
-    measAsState[imsi-1][numberOfEnbs+cellid-1] = curCellRSRQ; // then RSRQs
-    measAsState[imsi-1][2*numberOfEnbs] = cellid;
+    measRnti[imsi-1] = rnti;
+    measAsState[(imsi-1)*state_dim+(cellid-1)] = curCellRSRP; // first RSRPs
+    measAsState[(imsi-1)*state_dim+(numberOfEnbs+cellid-1)] = curCellRSRQ; // then RSRQs
+    measAsState[(imsi-1)*state_dim+(2*numberOfEnbs+cellid-1)] = 1;
 
     // iterate through measurements for neighboring cells and update measurement container
     for (std::list <LteRrcSap::MeasResultEutra>::iterator it = measReport.measResults.measResultListEutra.begin ();
         it != measReport.measResults.measResultListEutra.end ();
         ++it)
     {
-      measAsState[imsi-1][it->physCellId-1] = (it->haveRsrpResult ? (uint32_t) it->rsrpResult : -140);
-      measAsState[imsi-1][numberOfEnbs+it->physCellId-1] = (it->haveRsrqResult ? (uint32_t) it->rsrqResult : -20);
+      measAsState[(imsi-1)*state_dim+(it->physCellId-1)] = (it->haveRsrpResult ? (uint32_t) it->rsrpResult : -140);
+      measAsState[(imsi-1)*state_dim+(numberOfEnbs+it->physCellId-1)] = (it->haveRsrqResult ? (uint32_t) it->rsrqResult : -20);
+      measAsState[(imsi-1)*state_dim+(2*numberOfEnbs+it->physCellId-1)] = 0;
     }
 
-    printCurrentStateAndTime();
+    // printCurrentStateRntiAndTime();
+}
+
+/* 
+Define Observation Space as a 2D Box with RSRP, RSRQ and serving Cell Id as states for each UE.
+Since low and high are currently only supported to be same across fields, considering RSRP, RSRQ
+and serving cell id, low is set to be 0 and high as 200, considering 0-200 being the range of 
+RSRP and RSRQ
+*/
+Ptr<OpenGymSpace> GetObservationSpace (){
+  uint32_t low = 0;
+  uint32_t high = 200;
+  // State space size per UE = 3*Enbs for RSRP, RSRQ and serving cell id
+  std::vector<uint32_t> shape = {ueNodes.GetN () * 3 * enbNodes.GetN ()};
+  std::string type = TypeNameGet<uint32_t> ();
+  Ptr<OpenGymBoxSpace> space = CreateObject<OpenGymBoxSpace> (low, high, shape, type);
+  NS_LOG_UNCOND ("GetObservationSpace: " << space);
+  return space;
+}
+
+Ptr<OpenGymSpace> GetActionSpace (){
+  // enb_numbers to handover to for each node, obtained using decimal_to_nary function
+  int action_size = ueNodes.GetN () * enbNodes.GetN () - 1; // Action space 0 to N-1
+  Ptr<OpenGymDiscreteSpace> space = CreateObject<OpenGymDiscreteSpace> (action_size);
+  NS_LOG_UNCOND ("GetActionSpace: " << space);
+  return space;
+}
+
+Ptr<OpenGymDataContainer> GetObservation (){
+  std::vector<uint32_t> shape = {ueNodes.GetN () * 3 * enbNodes.GetN ()};
+  Ptr<OpenGymBoxContainer<uint32_t>> box = CreateObject<OpenGymBoxContainer<uint32_t>> (shape);
+
+  std::vector<uint32_t> curData;
+  curData.assign(measAsState.begin(), measAsState.end());
+
+  box->SetData (curData);
+  return box;
+}
+
+// Prepare action execution
+
+std::vector<uint32_t> decimal_to_nary(uint32_t decimal, uint32_t n = 3, uint32_t resize = 2){
+  
+  std::vector<uint32_t> nary;
+  if (!decimal){
+    for (uint32_t i = 0; i < resize; ++i){
+      nary.push_back(0);
+    }
+  }
+
+  
+  while (decimal){
+    nary.push_back(decimal % n);
+    decimal /= n;
+  }
+  
+  resize = std::max((uint32_t) nary.size(), resize);
+  for (uint32_t i = 0; i < (resize - nary.size()); ++i){
+    nary.push_back(0);
+  }
+  
+  std::reverse(nary.begin(), nary.end());
+  return nary;
+}
+
+bool ExecuteActions (Ptr<OpenGymDataContainer> action){
+  Ptr<OpenGymDiscreteContainer> discrete_action = DynamicCast<OpenGymDiscreteContainer> (action);
+  
+  uint32_t action_value = discrete_action->GetValue ();
+  uint32_t nary_n = enbNodes.GetN ();
+  uint32_t nary_resize = ueNodes.GetN ();
+  
+  std::vector<uint32_t> handover_ids = decimal_to_nary(action_value, nary_n, nary_resize);
+  // add 1 to all hanover ids as cellIds are numbered from 1 and not 0
+  for (uint32_t i = 0; i < handover_ids.size(); ++i){
+    handover_ids[i] += 1;
+  }
+
+  // Request handovers from ENB RRCs of each connected UE
+  for (uint32_t ue_imsi = 0; ue_imsi < ueNodes.GetN (); ++ue_imsi){
+    uint16_t curCellId = 1;
+    // position idx for one-hot encoded cell id vector for current eu_imsi
+    uint32_t start_idx = ue_imsi * 3 * enbNodes.GetN () + 2 * enbNodes.GetN ();
+    uint32_t end_idx = start_idx + enbNodes.GetN ();
+    
+    // Identify the current cell id for current ue
+    for (uint32_t i = start_idx; i < end_idx; ++i){
+      if (measAsState[i] == 1){
+        break;
+      }
+      curCellId += 1;
+    }
+
+    if (curCellId != handover_ids[ue_imsi]){
+      lteHelper->HandoverRequest (Seconds (0), ueLteDevs.Get (ue_imsi), enbLteDevs.Get (curCellId-1), enbLteDevs.Get (handover_ids[ue_imsi]-1));
+
+      // std::cout << "UE IMSI " << ue_imsi+1 << " CurCellId " << curCellId << " HOCellId " << handover_ids[ue_imsi] << std::endl;
+      // for (uint32_t enb_idx = 1; enb_idx <= enbNodes.GetN (); ++enb_idx){
+      //   uint16_t enb_CellId;
+      //   enbLteDevs.Get (enb_idx)->GetAttribute ("CellId", UintegerValue (enb_CellId));
+      //   std::cout << "Checking CellId " << enb_CellId << std::endl;
+
+      //   if (enb_CellId == curCellId){
+      //     std::cout << "Found curCellId" << std::endl;
+      //     Ptr<LteEnbRrc> CurEnbRrc = CreateObject<LteEnbRrc> ();
+      //     enbLteDevs.Get (enb_idx)->GetAttribute ("LteEnbRrc", PointerValue (CurEnbRrc));
+      //     CurEnbRrc->GetLteHandoverManagementSapUser ()->TriggerHandover (measRnti[ue_imsi], (uint16_t) handover_ids[ue_imsi]);
+      //     std::cout << "Completed handover" << std::endl;
+      //   }
+
+      //   uint16_t enb_CellId = enbNodes.Get (enb_idx)->GetObject<LteEnbNetDevice> ()->GetCellId();
+      //   std::cout << "Checking CellId " << enb_CellId << std::endl;
+      //   if (enb_CellId == curCellId){
+      //     std::cout << "Found curCellId" << std::endl;
+      //     Ptr<LteEnbRrc> CurEnbRrc = enbNodes.Get (enb_idx)->GetObject<LteEnbNetDevice> ()->GetRrc ();
+      //     CurEnbRrc->GetLteHandoverManagementSapUser ()->TriggerHandover (measRnti[ue_imsi], (uint16_t) handover_ids[ue_imsi]);
+      //     std::cout << "Completed handover" << std::endl;
+      //   }
+      // }
+    }
+  }
+
+  return true;
+}
+
+// Define Reward
+float GetReward (){
+  return 1.0;
+}
+
+// Define extra info
+std::string GetExtraInfo(void)
+{
+  std::string info = "Current Simulation Time: ";
+  info += std::to_string(Simulator::Now ().GetSeconds ());
+  NS_LOG_UNCOND("GetExtraInfo: " << info);
+  return info;
+}
+
+// Define game over condition
+bool GetGameOver(void){
+  return Simulator::IsFinished();
+}
+
+// Notify current state and schedule for next state reading
+void ScheduleNextStateRead(double envStepTime, Ptr<OpenGymInterface> openGym){
+  Simulator::Schedule (Seconds(envStepTime), &ScheduleNextStateRead, envStepTime, openGym);
+  openGym->NotifyCurrentState();
 }
 
 
@@ -212,6 +382,14 @@ main (int argc, char *argv[])
   // LogComponentEnable ("A2A4RsrqHandoverAlgorithm", logLevel);
   // LogComponentEnable ("A3RsrpHandoverAlgorithm", logLevel);
 
+  // Parameters of the environment
+  uint32_t simSeed = 1;
+  // double simulationTime = 10; //seconds // defined later as simTime
+  double envStepTime = 0.25; //seconds, ns3gym env step time interval
+  uint32_t openGymPort = 5555;
+  uint32_t testArg = 0;
+
+  // Parameters of the simulation
   double distance = 500.0; // m
   double yForUe = 500.0;   // m
   double speed = 20;       // m/s
@@ -228,6 +406,13 @@ main (int argc, char *argv[])
 
   // Command line arguments
   CommandLine cmd (__FILE__);
+  // required parameters for openGym Interface
+  cmd.AddValue ("openGymPort", "Port number for OpenGym env. Default: 5555", openGymPort);
+  cmd.AddValue ("simSeed", "Seed for random generator. Default: 1", simSeed);
+  // optional parameters for openGym Interface
+  // cmd.AddValue ("simTime", "Simulation time in seconds. Default: 10s", simulationTime); // used later as simTime
+  cmd.AddValue ("testArg", "Extra simulation argument. Default: 0", testArg);
+  // parameters for ns3 simulation
   cmd.AddValue ("simTime", "Total duration of the simulation (in seconds)", simTime);
   cmd.AddValue ("speed", "Speed of the UE (default = 20 m/s)", speed);
   cmd.AddValue ("enbTxPowerDbm", "TX power [dBm] used by HeNBs (default = 46.0)", enbTxPowerDbm);
@@ -235,34 +420,51 @@ main (int argc, char *argv[])
 
   cmd.Parse (argc, argv);
 
-  // Instantiate measurement containers
+  NS_LOG_UNCOND("Ns3Env parameters:");
+  // NS_LOG_UNCOND("--simulationTime: " << simulationTime); // defined as simTime
+  NS_LOG_UNCOND("--simulationTime: " << simTime);
+  NS_LOG_UNCOND("--openGymPort: " << openGymPort);
+  NS_LOG_UNCOND("--envStepTime: " << envStepTime);
+  NS_LOG_UNCOND("--seed: " << simSeed);
+  NS_LOG_UNCOND("--testArg: " << testArg);
+
+  RngSeedManager::SetSeed (1);
+  RngSeedManager::SetRun (simSeed);
+
+  // Instantiate time container
   for (uint32_t i = 0; i < numberOfUes; ++i){
     // Initialize simulation time record with 0 for each UE
     measTime.push_back(0);
+    // Initialize RNTI with 0 for each UE
+    measRnti.push_back(0);
+  }
+
+  // Initialize measurement container
+  for (uint32_t i = 0; i < numberOfUes * 3 * numberOfEnbs; ++i){
     // Initialize a vector of length numEnbs for both RSRP and RSRQ, and a single current/serving cellId
-    measAsState.push_back(std::vector<uint32_t>(2*numberOfEnbs+1,0));
+    measAsState.push_back(0);
   }
 
   // Create LTE helper
-  Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
+  // Ptr<LteHelper> lteHelper = CreateObject<LteHelper> (); // Defined Globally
   Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper> ();
   lteHelper->SetEpcHelper (epcHelper);
   // lteHelper->SetSchedulerType ("ns3::RrFfMacScheduler");
 
-  if (handover_algo == "A3-rsrp") {
-    lteHelper->SetHandoverAlgorithmType ("ns3::A3RsrpHandoverAlgorithm");
-    lteHelper->SetHandoverAlgorithmAttribute ("Hysteresis",
-                                              DoubleValue (3.0));
-    lteHelper->SetHandoverAlgorithmAttribute ("TimeToTrigger",
-                                              TimeValue (MilliSeconds (256)));
-  }
-  else{
-    lteHelper->SetHandoverAlgorithmType ("ns3::A2A4RsrqHandoverAlgorithm");
-    lteHelper->SetHandoverAlgorithmAttribute ("ServingCellThreshold",
-                                              UintegerValue (30));
-    lteHelper->SetHandoverAlgorithmAttribute ("NeighbourCellOffset",
-                                              UintegerValue (1));
-  }
+  // if (handover_algo == "A3-rsrp") {
+  //   lteHelper->SetHandoverAlgorithmType ("ns3::A3RsrpHandoverAlgorithm");
+  //   lteHelper->SetHandoverAlgorithmAttribute ("Hysteresis",
+  //                                             DoubleValue (3.0));
+  //   lteHelper->SetHandoverAlgorithmAttribute ("TimeToTrigger",
+  //                                             TimeValue (MilliSeconds (256)));
+  // }
+  // else{
+  //   lteHelper->SetHandoverAlgorithmType ("ns3::A2A4RsrqHandoverAlgorithm");
+  //   lteHelper->SetHandoverAlgorithmAttribute ("ServingCellThreshold",
+  //                                             UintegerValue (30));
+  //   lteHelper->SetHandoverAlgorithmAttribute ("NeighbourCellOffset",
+  //                                             UintegerValue (1));
+  // }
 
   // Ptr<Node> pgw = epcHelper->GetPgwNode ();
 
@@ -306,8 +508,6 @@ main (int argc, char *argv[])
    *            o (0, 0, 0)                                   y = yForUe
    */
 
-  NodeContainer ueNodes;
-  NodeContainer enbNodes;
   enbNodes.Create (numberOfEnbs);
   ueNodes.Create (numberOfUes);
 
@@ -334,13 +534,16 @@ main (int argc, char *argv[])
 
   // Install LTE Devices in eNB and UEs
   Config::SetDefault ("ns3::LteEnbPhy::TxPower", DoubleValue (enbTxPowerDbm));
-  NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
-  NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
+  // NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes); // Defined Globally
+  // NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes); // Defined Globally
+  enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
+  ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
 
   // Install the IP stack on the UEs
-  // internet.Install (ueNodes);
-  // Ipv4InterfaceContainer ueIpIfaces;
-  // ueIpIfaces = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueLteDevs));
+  InternetStackHelper internet;
+  internet.Install (ueNodes);
+  Ipv4InterfaceContainer ueIpIfaces;
+  ueIpIfaces = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueLteDevs));
 
   // Attach all UEs to the first eNodeB
   // for (uint16_t i = 0; i < numberOfUes; i++)
@@ -447,6 +650,19 @@ main (int argc, char *argv[])
   Config::Connect ("/NodeList/*/DeviceList/*/LteEnbRrc/RecvMeasurementReport",
                    MakeCallback (&ReceiveMeasurementReport));
 
+  // OpenGym Env-------------------------------------------------------------------------------------------
+  
+  Ptr<OpenGymInterface> openGym = CreateObject<OpenGymInterface> (openGymPort);
+  openGym->SetGetActionSpaceCb( MakeCallback (&GetActionSpace) );
+  openGym->SetGetObservationSpaceCb( MakeCallback (&GetObservationSpace) );
+  openGym->SetGetGameOverCb( MakeCallback (&GetGameOver) );
+  openGym->SetGetObservationCb( MakeCallback (&GetObservation) );
+  openGym->SetGetRewardCb( MakeCallback (&GetReward) );
+  openGym->SetGetExtraInfoCb( MakeCallback (&GetExtraInfo) );
+  openGym->SetExecuteActionsCb( MakeCallback (&ExecuteActions) );
+
+
+  Simulator::Schedule (Seconds(envStepTime), &ScheduleNextStateRead, envStepTime, openGym);
 
   Simulator::Stop (Seconds (simTime));
   Simulator::Run ();
@@ -454,6 +670,7 @@ main (int argc, char *argv[])
   // GtkConfigStore config;
   // config.ConfigureAttributes ();
 
+  openGym->NotifySimulationEnd();
   Simulator::Destroy ();
   return 0;
 

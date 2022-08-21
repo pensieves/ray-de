@@ -5,7 +5,7 @@ For inbuilt handover algorithms i.e.:
 
 To run this example, copy this directory inside the ns3-gym scratch directory:
 ```
-cp -r ../handover-optimization $NS3_INSTALLED_DIR/scratch/handover-optimization
+cp -r ../inbuilt-handover-algorithms $NS3_INSTALLED_DIR/scratch/inbuilt-handover-algorithms
 ```
 
 Configure and build the ns3 module from the ns3 source directory:
@@ -20,15 +20,15 @@ python3 waf build
 
 For A3-rsrp algorithm, run and save log as:
 ```
-python3 waf --run "handover-optimization --handover_algo=A3-rsrp" >> scratch/handover-optimization/plots/A3-rsrp-handover.txt
+python3 waf --run "inbuilt-handover-algorithms --handover_algo=A3-rsrp" >> scratch/inbuilt-handover-algorithms/plots/A3-rsrp-handover.txt
 ```
 
 Alternatively, for A2A4-rsrq algorithm, run and save log as:
 ```
-python3 waf --run "handover-optimization --handover_algo=A2A4-rsrq" >> scratch/handover-optimization/plots/A2A4-rsrq-handover.txt
+python3 waf --run "inbuilt-handover-algorithms --handover_algo=A2A4-rsrq" >> scratch/inbuilt-handover-algorithms/plots/A2A4-rsrq-handover.txt
 ```
 
-To generate plots of rsrp, rsrq and serving cell states, run the following script from inside the `scratch/handover-optimization/plots` directory for the required handover log file:
+To generate plots of rsrp, rsrq and serving cell states, run the following script from inside the `scratch/inbuilt-handover-algorithms/plots` directory for the required handover log file:
 ```
 python3 inbuilt-handover-plots.py A3-rsrp-handover.txt
 ```
