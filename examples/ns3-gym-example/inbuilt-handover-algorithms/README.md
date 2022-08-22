@@ -20,12 +20,12 @@ python3 waf build
 
 For A3-rsrp algorithm, run and save log as:
 ```
-python3 waf --run "inbuilt-handover-algorithms --handover_algo=A3-rsrp" >> scratch/inbuilt-handover-algorithms/plots/A3-rsrp-handover.txt
+python3 waf --run "inbuilt-handover-algorithms --handoverAlgo=A3-rsrp" >> scratch/inbuilt-handover-algorithms/plots/A3-rsrp-handover.txt
 ```
 
 Alternatively, for A2A4-rsrq algorithm, run and save log as:
 ```
-python3 waf --run "inbuilt-handover-algorithms --handover_algo=A2A4-rsrq" >> scratch/inbuilt-handover-algorithms/plots/A2A4-rsrq-handover.txt
+python3 waf --run "inbuilt-handover-algorithms --handoverAlgo=A2A4-rsrq" >> scratch/inbuilt-handover-algorithms/plots/A2A4-rsrq-handover.txt
 ```
 
 To generate plots of rsrp, rsrq and serving cell states, run the following script from inside the `scratch/inbuilt-handover-algorithms/plots` directory for the required handover log file:

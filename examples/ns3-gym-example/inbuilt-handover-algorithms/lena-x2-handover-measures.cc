@@ -124,9 +124,21 @@ NotifyHandoverEndOkEnb (std::string context,
 // Global measurement and id containers
 uint32_t numberOfUes = 2; // can be changed in main()
 uint32_t numberOfEnbs = 2; // can be changed in main()
-// uint16_t numBearersPerUe = 0;
-std::vector<double> measTime; // for each UE - simulation time at which measurement was collected
-std::vector<std::vector<uint32_t>> measAsState; // for each UE - first RSRP of all Enbs, then RSRQ of all Enbs and then current/serving cell ID
+
+// for each UE - simulation time at which measurement was collected
+std::vector<double> measTime;
+// for each UE - first RSRP of all Enbs, then RSRQ of all Enbs
+// and then current/serving cell ID
+std::vector<std::vector<uint32_t>> measAsState;
+
+void printStateMatrix (){
+  for (std::vector<uint32_t> v: measAsState){
+    for (uint32_t e: v){
+      std::cout << e << " ";
+    }
+    std::cout << std::endl;
+  }
+}
 
 void
 printCurrentStateAndTime(){
@@ -137,12 +149,7 @@ printCurrentStateAndTime(){
   std::cout << std::endl;
 
   std::cout << "RSRP-RSRQ-ServingCellId State:" << std::endl;
-  for (std::vector<uint32_t> s: measAsState){
-    for (uint32_t e: s){
-      std::cout << e << " ";
-    }
-    std::cout << std::endl;
-  }
+  printStateMatrix ();
 }
 
 void
@@ -167,18 +174,21 @@ ReceiveMeasurementReport (std::string context,
               << " RSRQ " << curCellRSRQ // Reference Signal Received Quality -20 dB (Bad) to -3 dB (Good)
               << std::endl;
 
-    measTime[imsi-1] = curSimTime;
-    measAsState[imsi-1][cellid-1] = curCellRSRP; // first RSRPs
-    measAsState[imsi-1][numberOfEnbs+cellid-1] = curCellRSRQ; // then RSRQs
-    measAsState[imsi-1][2*numberOfEnbs] = cellid;
+    imsi -= 1;
+    cellid -= 1;
+
+    measTime[imsi] = curSimTime;
+    measAsState[imsi][cellid] = curCellRSRP; // first RSRPs
+    measAsState[imsi][numberOfEnbs+cellid] = curCellRSRQ; // then RSRQs
+    measAsState[imsi][2*numberOfEnbs] = cellid;
 
     // iterate through measurements for neighboring cells and update measurement container
     for (std::list <LteRrcSap::MeasResultEutra>::iterator it = measReport.measResults.measResultListEutra.begin ();
         it != measReport.measResults.measResultListEutra.end ();
         ++it)
     {
-      measAsState[imsi-1][it->physCellId-1] = (it->haveRsrpResult ? (uint32_t) it->rsrpResult : -140);
-      measAsState[imsi-1][numberOfEnbs+it->physCellId-1] = (it->haveRsrqResult ? (uint32_t) it->rsrqResult : -20);
+      measAsState[imsi][it->physCellId-1] = (it->haveRsrpResult ? (uint32_t) it->rsrpResult : 0); // RSRP values between 0 and 97
+      measAsState[imsi][numberOfEnbs+it->physCellId-1] = (it->haveRsrqResult ? (uint32_t) it->rsrqResult : 0);
     }
 
     printCurrentStateAndTime();
@@ -195,29 +205,13 @@ ReceiveMeasurementReport (std::string context,
 int
 main (int argc, char *argv[])
 {
-  // LogLevel logLevel = (LogLevel)(LOG_PREFIX_ALL | LOG_LEVEL_ALL);
-
-  // LogComponentEnable ("LteHelper", logLevel);
-  // LogComponentEnable ("EpcHelper", logLevel);
-  // LogComponentEnable ("EpcEnbApplication", logLevel);
-  // LogComponentEnable ("EpcMmeApplication", logLevel);
-  // LogComponentEnable ("EpcPgwApplication", logLevel);
-  // LogComponentEnable ("EpcSgwApplication", logLevel);
-  // LogComponentEnable ("EpcX2", logLevel);
-
-  // LogComponentEnable ("LteEnbRrc", logLevel);
-  // LogComponentEnable ("LteEnbNetDevice", logLevel);
-  // LogComponentEnable ("LteUeRrc", logLevel);
-  // LogComponentEnable ("LteUeNetDevice", logLevel);
-  // LogComponentEnable ("A2A4RsrqHandoverAlgorithm", logLevel);
-  // LogComponentEnable ("A3RsrpHandoverAlgorithm", logLevel);
 
   double distance = 500.0; // m
   double yForUe = 500.0;   // m
   double speed = 20;       // m/s
   double simTime = (double)(numberOfEnbs + 1) * distance / speed; // 1500 m / 20 m/s = 75 secs
   double enbTxPowerDbm = 46.0;
-  std::string handover_algo = "A3-rsrp";
+  std::string handoverAlgo = "A3-rsrp";
 
   // change some default attributes so that they are reasonable for
   // this scenario, but do this before processing command line
@@ -231,7 +225,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("simTime", "Total duration of the simulation (in seconds)", simTime);
   cmd.AddValue ("speed", "Speed of the UE (default = 20 m/s)", speed);
   cmd.AddValue ("enbTxPowerDbm", "TX power [dBm] used by HeNBs (default = 46.0)", enbTxPowerDbm);
-  cmd.AddValue ("handover_algo", "Handover algorithm to be used (default = A3-rsrp)", handover_algo);
+  cmd.AddValue ("handoverAlgo", "Handover algorithm to be used (default = A3-rsrp)", handoverAlgo);
 
   cmd.Parse (argc, argv);
 
@@ -249,7 +243,7 @@ main (int argc, char *argv[])
   lteHelper->SetEpcHelper (epcHelper);
   // lteHelper->SetSchedulerType ("ns3::RrFfMacScheduler");
 
-  if (handover_algo == "A3-rsrp") {
+  if (handoverAlgo == "A3-rsrp") {
     lteHelper->SetHandoverAlgorithmType ("ns3::A3RsrpHandoverAlgorithm");
     lteHelper->SetHandoverAlgorithmAttribute ("Hysteresis",
                                               DoubleValue (3.0));
@@ -263,33 +257,6 @@ main (int argc, char *argv[])
     lteHelper->SetHandoverAlgorithmAttribute ("NeighbourCellOffset",
                                               UintegerValue (1));
   }
-
-  // Ptr<Node> pgw = epcHelper->GetPgwNode ();
-
-  // Create a single RemoteHost
-  // NodeContainer remoteHostContainer;
-  // remoteHostContainer.Create (1);
-  // Ptr<Node> remoteHost = remoteHostContainer.Get (0);
-  // InternetStackHelper internet;
-  // internet.Install (remoteHostContainer);
-
-  // Create the Internet
-  // PointToPointHelper p2ph;
-  // p2ph.SetDeviceAttribute ("DataRate", DataRateValue (DataRate ("100Gb/s")));
-  // p2ph.SetDeviceAttribute ("Mtu", UintegerValue (1500));
-  // p2ph.SetChannelAttribute ("Delay", TimeValue (Seconds (0.010)));
-  // NetDeviceContainer internetDevices = p2ph.Install (pgw, remoteHost);
-  // Ipv4AddressHelper ipv4h;
-  // ipv4h.SetBase ("1.0.0.0", "255.0.0.0");
-  // Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign (internetDevices);
-  // Ipv4Address remoteHostAddr = internetIpIfaces.GetAddress (1);
-
-
-  // Routing of the Internet Host (towards the LTE network)
-  // Ipv4StaticRoutingHelper ipv4RoutingHelper;
-  // Ptr<Ipv4StaticRouting> remoteHostStaticRouting = ipv4RoutingHelper.GetStaticRouting (remoteHost->GetObject<Ipv4> ());
-  // interface 0 is localhost, 1 is the p2p device
-  // remoteHostStaticRouting->AddNetworkRouteTo (Ipv4Address ("7.0.0.0"), Ipv4Mask ("255.0.0.0"), 1);
 
   /*
    * Network topology:
@@ -343,85 +310,15 @@ main (int argc, char *argv[])
   Ipv4InterfaceContainer ueIpIfaces;
   ueIpIfaces = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueLteDevs));
 
-  // Attach all UEs to the first eNodeB
-  // for (uint16_t i = 0; i < numberOfUes; i++)
-  //   {
-  //     lteHelper->Attach (ueLteDevs.Get (i), enbLteDevs.Get (0));
-  //   }
+  // Attach UEs to the eNodeBs
   lteHelper->Attach (ueLteDevs.Get (0), enbLteDevs.Get (0));
   lteHelper->Attach (ueLteDevs.Get (1), enbLteDevs.Get (1));
 
 
   NS_LOG_LOGIC ("setting up applications");
 
-  // Install and start applications on UEs and remote host
-  // uint16_t dlPort = 10000;
-  // uint16_t ulPort = 20000;
-
-  // randomize a bit start times to avoid simulation artifacts
-  // (e.g., buffer overflows due to packet transmissions happening
-  // exactly at the same time)
-  // Ptr<UniformRandomVariable> startTimeSeconds = CreateObject<UniformRandomVariable> ();
-  // startTimeSeconds->SetAttribute ("Min", DoubleValue (0));
-  // startTimeSeconds->SetAttribute ("Max", DoubleValue (0.010));
-
-  // for (uint32_t u = 0; u < numberOfUes; ++u)
-  //   {
-  //     Ptr<Node> ue = ueNodes.Get (u);
-  //     // Set the default gateway for the UE
-  //     Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ue->GetObject<Ipv4> ());
-  //     ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
-
-  //     for (uint32_t b = 0; b < numBearersPerUe; ++b)
-  //       {
-  //         ++dlPort;
-  //         ++ulPort;
-
-  //         ApplicationContainer clientApps;
-  //         ApplicationContainer serverApps;
-
-  //         NS_LOG_LOGIC ("installing UDP DL app for UE " << u);
-  //         UdpClientHelper dlClientHelper (ueIpIfaces.GetAddress (u), dlPort);
-  //         clientApps.Add (dlClientHelper.Install (remoteHost));
-  //         PacketSinkHelper dlPacketSinkHelper ("ns3::UdpSocketFactory",
-  //                                              InetSocketAddress (Ipv4Address::GetAny (), dlPort));
-  //         serverApps.Add (dlPacketSinkHelper.Install (ue));
-
-  //         NS_LOG_LOGIC ("installing UDP UL app for UE " << u);
-  //         UdpClientHelper ulClientHelper (remoteHostAddr, ulPort);
-  //         clientApps.Add (ulClientHelper.Install (ue));
-  //         PacketSinkHelper ulPacketSinkHelper ("ns3::UdpSocketFactory",
-  //                                              InetSocketAddress (Ipv4Address::GetAny (), ulPort));
-  //         serverApps.Add (ulPacketSinkHelper.Install (remoteHost));
-
-  //         Ptr<EpcTft> tft = Create<EpcTft> ();
-  //         EpcTft::PacketFilter dlpf;
-  //         dlpf.localPortStart = dlPort;
-  //         dlpf.localPortEnd = dlPort;
-  //         tft->Add (dlpf);
-  //         EpcTft::PacketFilter ulpf;
-  //         ulpf.remotePortStart = ulPort;
-  //         ulpf.remotePortEnd = ulPort;
-  //         tft->Add (ulpf);
-  //         EpsBearer bearer (EpsBearer::NGBR_VIDEO_TCP_DEFAULT);
-  //         lteHelper->ActivateDedicatedEpsBearer (ueLteDevs.Get (u), bearer, tft);
-
-  //         Time startTime = Seconds (startTimeSeconds->GetValue ());
-  //         serverApps.Start (startTime);
-  //         clientApps.Start (startTime);
-
-  //       } // end for b
-  //   }
-
-
   // Add X2 interface
   lteHelper->AddX2Interface (enbNodes);
-
-  // X2-based Handover
-  //lteHelper->HandoverRequest (Seconds (0.100), ueLteDevs.Get (0), enbLteDevs.Get (0), enbLteDevs.Get (1));
-
-  // Uncomment to enable PCAP tracing
-  // p2ph.EnablePcapAll("lena-x2-handover-measures");
 
   lteHelper->EnablePhyTraces ();
   lteHelper->EnableMacTraces ();
@@ -451,9 +348,6 @@ main (int argc, char *argv[])
 
   Simulator::Stop (Seconds (simTime));
   Simulator::Run ();
-
-  // GtkConfigStore config;
-  // config.ConfigureAttributes ();
 
   Simulator::Destroy ();
   return 0;
