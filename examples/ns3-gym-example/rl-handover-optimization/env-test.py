@@ -1,6 +1,7 @@
 from sys import argv
 from ns3gym import ns3env
 
+# argv[1] = 0 -> without debugging; = 1 -> with debugging
 debug = bool(int(argv[1]))
 env = ns3env.Ns3Env(debug=debug)
 obs_space = env.observation_space
