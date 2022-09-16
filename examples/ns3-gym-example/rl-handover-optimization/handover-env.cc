@@ -353,8 +353,8 @@ float GetReward (){
     }
 
     // Identify Max measurement value and transitioned cell measurement value
-    uint32_t maxMeas = measAsState[imsi][0];
-    uint32_t transitionedCellMeas = measAsState[imsi][0];
+    double maxMeas = measAsState[imsi][0];
+    double transitionedCellMeas = measAsState[imsi][0];
 
     // The range index i to extract meas is currently for RSRP values
     // This will change if RSRQ is decided to be used.
@@ -369,8 +369,12 @@ float GetReward (){
     }
     
     // reward summation
-    reward += (maxMeas - transitionedCellMeas);
+    // reward += (maxMeas - transitionedCellMeas);
+    reward += (transitionedCellMeas == maxMeas ? 0.1 : transitionedCellMeas - maxMeas);
     if (handoverOccurred[imsi]){
+      if (transitionedCellMeas == maxMeas){
+        reward += 0.5;
+      }
       reward -= handoverCost;
     }
   }
