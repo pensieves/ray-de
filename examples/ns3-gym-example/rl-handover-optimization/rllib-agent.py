@@ -13,6 +13,12 @@ from copy import deepcopy
 from deepmerge import Merger
 from importlib import import_module
 
+import argparse
+
+parser = argparse.ArgumentParser(description="RLLib agent for network optimization.")
+parser.add_argument("--config", default="run_config.yaml", help="config file for the program.")
+args = parser.parse_args()
+
 def load_last_checkpoint(agent, checkpoint_dir="ray_outputs"):
     checkpoint_dir = Path(checkpoint_dir)
     if checkpoint_dir.exists():
@@ -23,7 +29,7 @@ def load_last_checkpoint(agent, checkpoint_dir="ray_outputs"):
         agent.restore(checkpoint_path)
     print(f"No checkpoint dir at {checkpoint_dir}. Agent loaded with fresh weights.")
 
-with open("run_config.yaml", "r") as f:
+with open(args.config, "r") as f:
     config = yaml.safe_load(f)
 
 ray.init(**config["ray_config"])

@@ -9,7 +9,7 @@ env_config:
   debug: true
 
 agent_config:
-  agent: ppo.PPOTrainer
+  agent: dqn.DQNTrainer
   framework: torch
   # NOTE: num_workers*num_cpus_per_worker should not exceed num_cpus 
   num_workers: 3
@@ -17,14 +17,21 @@ agent_config:
   num_envs_per_worker: 2
   ignore_worker_failures: true
   disable_env_checking: true
-  model:
-    fcnet_hiddens: [256, 256]
-    fcnet_activation: relu
-  rollout_fragment_length: 10
-  train_batch_size: 64
-  sgd_minibatch_size: 32
-  num_sgd_iter: 4
-  # min_time_s_per_reporting: 1
+  double_q: true
+  dueling: true
+  noisy: false
+  replay_buffer_config:
+    capacity: 1000000
+  n_step: 16
+  target_network_update_freq: 8000
+  lr: 0.0000625
+  adam_epsilon: .00015
+  hiddens: [256, 256]
+  rollout_fragment_length: 300
+  train_batch_size: 32
+  exploration_config:
+    epsilon_timesteps: 200000
+    final_epsilon: 0.01
 
 other_config:
   num_train_iter: 1000

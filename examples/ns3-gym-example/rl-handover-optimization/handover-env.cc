@@ -370,11 +370,12 @@ float GetReward (){
     
     // reward summation
     // reward += (maxMeas - transitionedCellMeas);
-    reward += (transitionedCellMeas == maxMeas ? 0.1 : transitionedCellMeas - maxMeas);
+    reward += (transitionedCellMeas - maxMeas);
+    // reward += (transitionedCellMeas == maxMeas ? 0.1 : transitionedCellMeas - maxMeas);
     if (handoverOccurred[imsi]){
-      if (transitionedCellMeas == maxMeas){
-        reward += 0.5;
-      }
+      // if (transitionedCellMeas == maxMeas){
+      //   reward += 2;
+      // }
       reward -= handoverCost;
     }
   }
